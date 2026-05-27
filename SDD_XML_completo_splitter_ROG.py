@@ -5,6 +5,29 @@ import io
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="SDD Multi-Splitter APE", layout="wide")
 
+def merge_duplicate_pmt_inf(tree):
+    root = tree.getroot()
+    # Dizionario: { data: [lista_di_PmtInf_con_quella_data] }
+    groups = {}
+    
+    for pmt in root.xpath(".//*[local-name()='PmtInf']"):
+        date_node = pmt.xpath(".//*[local-name()='ReqdColltnDt']")
+        if date_node:
+            date = date_node[0].text
+            groups.setdefault(date, []).append(pmt)
+    
+    # Per ogni data, se ci sono più PmtInf, le fondiamo
+    for date, pmts in groups.items():
+        if len(pmts) > 1:
+            main_pmt = pmts[0]
+            for extra_pmt in pmts[1:]:
+                # Sposta tutte le transazioni dalla Pmt secondaria alla principale
+                for tx in extra_pmt.xpath(".//*[local-name()='DrctDbtTxInf']"):
+                    main_pmt.append(tx)
+                # Rimuovi la Pmt secondaria
+                extra_pmt.getparent().remove(extra_pmt)
+    return tree
+
 def process_sdd_xml(xml_bytes, split_requests):
     parser = etree.XMLParser(remove_blank_text=True)
     tree = etree.parse(io.BytesIO(xml_bytes), parser)
@@ -67,6 +90,9 @@ def process_sdd_xml(xml_bytes, split_requests):
     total_count = len(root.xpath(".//*[local-name()='DrctDbtTxInf']"))
     grpHdr_nb = root.xpath(".//*[local-name()='GrpHdr']//*[local-name()='NbOfTxs']")
     if grpHdr_nb: grpHdr_nb[0].text = str(total_count)
+
+    # --- POST PROCESSING: Unione sottodistinte ---
+    tree = merge_duplicate_pmt_inf(tree)
 
     return etree.tostring(tree, pretty_print=True, encoding='ISO-8859-1', xml_declaration=True)
 
